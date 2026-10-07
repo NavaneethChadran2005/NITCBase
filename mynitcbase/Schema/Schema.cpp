@@ -3,177 +3,146 @@
 #include <cmath>
 #include <cstring>
 
-int Schema::openRel(char relName[ATTR_SIZE]) {
-  int ret = OpenRelTable::openRel(relName);
+int Schema::openRel(char relName[ATTR_SIZE]){
+    int ret = OpenRelTable::openRel(relName);
 
-  // the OpenRelTable::openRel() function returns the rel-id if successful
-  // a valid rel-id will be within the range 0 <= relId < MAX_OPEN and any
-  // error codes will be negative
-  if(ret >= 0){
-    return SUCCESS;
-  }
+    // OpenRelTable::openRel() will send rel-id [0,12].
+    //If relation is not open, any error code will return negative integer.
+    if(ret >= 0){
+        return SUCCESS;
+    }
 
-  //otherwise it returns an error message
-  return ret;
+    return ret;
 }
 
-int Schema::closeRel(char relName[ATTR_SIZE]) {
-  // if relation is relation catalog or attribute catalog, it cannot be closed
-  if (strcmp(relName, RELCAT_RELNAME) == 0 || strcmp(relName, ATTRCAT_RELNAME) == 0) {
-    return E_NOTPERMITTED;
-  }
+int Schema::closeRel(char relName[ATTR_SIZE]){
+    // if relation in relation catalog or attribute catalog, the not permited to close
+    if( strcmp(relName,RELCAT_RELNAME) == 0 || strcmp(relName,ATTRCAT_RELNAME) == 0 ){
+        return E_NOTPERMITTED;
+    }
 
-  // this function returns the rel-id of a relation if it is open or
-  // E_RELNOTOPEN if it is not.
-  int relId = OpenRelTable::getRelId(relName);
+    int relId = OpenRelTable::getRelId(relName);
+    if( relId == E_RELNOTOPEN){
+        return E_RELNOTOPEN;
+    }
 
-  // if the relation is not open
-  if (relId == E_RELNOTOPEN) {
-    return E_RELNOTOPEN;
-  }
-
-  return OpenRelTable::closeRel(relId);
+    return OpenRelTable::closeRel(relId);
 }
 
-int Schema::renameRel(char oldRelName[ATTR_SIZE], char newRelName[ATTR_SIZE]) {
-  // if the oldRelName or newRelName is either Relation Catalog or Attribute Catalog,
-  // return E_NOTPERMITTED
-  if (strcmp(oldRelName, RELCAT_RELNAME) == 0 || strcmp(oldRelName, ATTRCAT_RELNAME) == 0 ||
-      strcmp(newRelName, RELCAT_RELNAME) == 0 || strcmp(newRelName, ATTRCAT_RELNAME) == 0) {
-    return E_NOTPERMITTED;
-  }
+// renameRel(): method to change the relation name of specified relation to a new specified name.
+int Schema::renameRel(char oldRelName[ATTR_SIZE], char newRelName[ATTR_SIZE]){
+    // oldRelName and newRelName should not be same as relation catalog or attribute catalog name.
+    if(strcmp(oldRelName,RELCAT_RELNAME) == 0 || strcmp(newRelName,RELCAT_RELNAME) == 0 || strcmp(oldRelName,ATTRCAT_RELNAME) == 0 || strcmp(newRelName,ATTRCAT_RELNAME) == 0){
+        return E_NOTPERMITTED;
+    }
 
-  // if the relation is open
-  //    (check if OpenRelTable::getRelId() returns E_RELNOTOPEN)
-  //    return E_RELOPEN
-  if (OpenRelTable::getRelId(oldRelName) != E_RELNOTOPEN) {
-    return E_RELOPEN;
-  }
+    // check if relation is closed or not
+    // NOTE: Relation must be close to perform this function
+    int relId = OpenRelTable:: getRelId(oldRelName);
+    if(relId >= 0){
+        return E_RELOPEN;
+    }
 
-  // retVal = BlockAccess::renameRelation(oldRelName, newRelName);
-  // return retVal
-  int retVal = BlockAccess::renameRelation(oldRelName, newRelName);
-  return retVal;
+    int retVal = BlockAccess:: renameRelation(oldRelName, newRelName);
+    return retVal;
 }
 
-int Schema::renameAttr(char *relName, char *oldAttrName, char *newAttrName) {
-  // if the relName is either Relation Catalog or Attribute Catalog,
-  // return E_NOTPERMITTED
-  if (strcmp(relName, RELCAT_RELNAME) == 0 || strcmp(relName, ATTRCAT_RELNAME) == 0) {
-    return E_NOTPERMITTED;
-  }
+// renameAttr(): method used to change attrname of a given relation
+// NOTE: Relation must be close to perfrom this operation.
+int Schema::renameAttr(char relName[ATTR_SIZE], char oldAttrName[ATTR_SIZE], char newAttrName[ATTR_SIZE]){
+    // check if relName is not same as RELCAT_NAME and ATTRCAT_NAME
+    if(strcmp(relName,RELCAT_RELNAME) == 0 || strcmp(relName,ATTRCAT_RELNAME) == 0){
+        return E_NOTPERMITTED;
+    }
 
-  // if the relation is open
-  //    (check if OpenRelTable::getRelId() returns E_RELNOTOPEN)
-  //    return E_RELOPEN
-  if (OpenRelTable::getRelId(relName) != E_RELNOTOPEN) {
-    return E_RELOPEN;
-  }
+    // check if relation is closed or not
+    int relId = OpenRelTable::getRelId(relName);
+    if(relId >=0){
+        return E_RELOPEN;
+    }
 
-  // Call BlockAccess::renameAttribute with appropriate arguments.
-  int retVal = BlockAccess::renameAttribute(relName, oldAttrName, newAttrName);
-  
-  // return the value returned by the above renameAttribute() call
-  return retVal;
+    int retVal = BlockAccess::renameAttribute(relName, oldAttrName, newAttrName);
+    return retVal;
 }
 
-int Schema::createRel(char relName[], int nAttrs, char attrs[][ATTR_SIZE], int attrtype[]) {
-    // declare variable relNameAsAttribute of type Attribute
+// createRel(): method to create a new relation with the given name, attributes.
+int Schema::createRel(char relName[], int nAttrs, char attrs[][ATTR_SIZE], int attrtype[]){
+
+    /*---- Firstly we will check if the relName already exist or not ----*/
     Attribute relNameAsAttribute;
-    
-    // copy the relName into relNameAsAttribute.sVal
     strcpy(relNameAsAttribute.sVal, relName);
 
-    // Reset the searchIndex using RelCacheTable::resetSearchIndex()
+    RecId targetRelId;
+    
+    // perform linear search on relation catalog
     RelCacheTable::resetSearchIndex(RELCAT_RELID);
-
-    // Search the relation catalog for attribute value "RelName" = relNameAsAttribute
-    RecId targetRelId = BlockAccess::linearSearch(RELCAT_RELID, "RelName", relNameAsAttribute, EQ);
-
-    // if a relation with name `relName` already exists
-    if (targetRelId.block != -1 && targetRelId.slot != -1) {
+    char  relCatAttrRelname[ATTR_SIZE] = RELCAT_ATTR_RELNAME;
+    // char *relCatAttrRelname;
+    // strcpy(relCatAttrRelname,RELCAT_ATTR_RELNAME);
+    targetRelId = BlockAccess::linearSearch(RELCAT_RELID,relCatAttrRelname,relNameAsAttribute,EQ);
+    if(targetRelId.block != -1 && targetRelId.slot != -1){
         return E_RELEXIST;
     }
 
-    // compare every pair of attributes of attrNames[] array
-    for (int i = 0; i < nAttrs; i++) {
-        for (int j = i + 1; j < nAttrs; j++) {
-            if (strcmp(attrs[i], attrs[j]) == 0) {
+    // compare every pair of attributes of attrsNames[] to check if there is any dublicate.
+    for(int i = 0; i < nAttrs; i++){
+        for(int j = i + 1; j < nAttrs; j++){
+            if(strcmp(attrs[i], attrs[j]) == 0){
                 return E_DUPLICATEATTR;
             }
         }
     }
 
-    /* declare relCatRecord of type Attribute which will be used to store the
-       record corresponding to the new relation which will be inserted
-       into relation catalog */
+    /*--- Now a record into relational catalog ---*/
     Attribute relCatRecord[RELCAT_NO_ATTRS];
-
-    // fill relCatRecord fields
     strcpy(relCatRecord[RELCAT_REL_NAME_INDEX].sVal, relName);
     relCatRecord[RELCAT_NO_ATTRIBUTES_INDEX].nVal = nAttrs;
     relCatRecord[RELCAT_NO_RECORDS_INDEX].nVal = 0;
     relCatRecord[RELCAT_FIRST_BLOCK_INDEX].nVal = -1;
     relCatRecord[RELCAT_LAST_BLOCK_INDEX].nVal = -1;
-    
-    // (number of slots is calculated as specified in the physical layer docs)
-    // Integer division automatically handles the floor() requirement
-    relCatRecord[RELCAT_NO_SLOTS_PER_BLOCK_INDEX].nVal = (2016 / (16 * nAttrs + 1));
+    relCatRecord[RELCAT_NO_SLOTS_PER_BLOCK_INDEX].nVal = floor((2016 / (16 * nAttrs + 1)));
 
-    int retVal = BlockAccess::insert(RELCAT_RELID, relCatRecord);
-    // if BlockAccess::insert fails return retVal
-    if (retVal != SUCCESS) {
-        return retVal;
+    // use insert() to insert the above record in relcation catalog
+    int ret = BlockAccess::insert(RELCAT_RELID, relCatRecord);
+    if(ret != SUCCESS){
+        return ret;
     }
 
-    // iterate through 0 to numOfAttributes - 1 :
-    for (int i = 0; i < nAttrs; i++) {
-        /* declare Attribute attrCatRecord to store the attribute catalog
-           record corresponding to i'th attribute of the argument passed*/
+    /*--- Now inserting attributes into attribute catalog ---*/
+    // iterate through all the attributes, put it in a attrCatRecord and insert into attribute catalog
+    for(int i = 0; i < nAttrs; i++){
         Attribute attrCatRecord[ATTRCAT_NO_ATTRS];
-
-        // fill attrCatRecord fields
         strcpy(attrCatRecord[ATTRCAT_REL_NAME_INDEX].sVal, relName);
         strcpy(attrCatRecord[ATTRCAT_ATTR_NAME_INDEX].sVal, attrs[i]);
         attrCatRecord[ATTRCAT_ATTR_TYPE_INDEX].nVal = attrtype[i];
         attrCatRecord[ATTRCAT_PRIMARY_FLAG_INDEX].nVal = -1;
         attrCatRecord[ATTRCAT_ROOT_BLOCK_INDEX].nVal = -1;
         attrCatRecord[ATTRCAT_OFFSET_INDEX].nVal = i;
-
-        int attrRetVal = BlockAccess::insert(ATTRCAT_RELID, attrCatRecord);
-        
-        /* if attribute catalog insert fails:
-             delete the relation by calling deleteRel(targetrel) of schema layer
-             return E_DISKFULL
-        */
-        if (attrRetVal != SUCCESS) {
-            Schema::deleteRel(relName); 
-            return E_DISKFULL; 
+        int retVal = BlockAccess::insert(ATTRCAT_RELID, attrCatRecord);
+        if(retVal != SUCCESS){
+            //delete the relation using delRel(relId);
+            Schema::deleteRel(relName);
+            return E_DISKFULL;
         }
     }
 
     return SUCCESS;
+    
 }
 
-int Schema::deleteRel(char *relName) {
-    // if the relation to delete is either Relation Catalog or Attribute Catalog,
-    //     return E_NOTPERMITTED
-    if (strcmp(relName, RELCAT_RELNAME) == 0 || strcmp(relName, ATTRCAT_RELNAME) == 0) {
+// deleteRel()
+int Schema::deleteRel(char *relName){
+    /*--- if relName == RELCAT or ATTRCAT, then not permitted ---*/
+    if(strcmp(relName, RELCAT_RELNAME) == 0 || strcmp(relName, ATTRCAT_RELNAME) == 0){
         return E_NOTPERMITTED;
     }
 
-    // get the rel-id using appropriate method of OpenRelTable class by
-    // passing relation name as argument
+    // Check if relation is open or not. Deletion can be performed only if relation is closed
     int relId = OpenRelTable::getRelId(relName);
-
-    // if relation is opened in open relation table, return E_RELOPEN
-    if (relId != E_RELNOTOPEN) {
+    if( relId >=0 && relId < MAX_OPEN){
         return E_RELOPEN;
     }
 
-    // Call BlockAccess::deleteRelation() with appropriate argument.
-    int retVal = BlockAccess::deleteRelation(relName);
-
-    // return the value returned by the above deleteRelation() call
-    return retVal;
+    int ret = BlockAccess::deleteRelation(relName);
+    return ret;
 }
